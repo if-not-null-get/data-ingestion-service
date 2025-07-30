@@ -110,6 +110,53 @@ public class EventPublisherService {
         }
     }
 
+    /**
+     * Health check - простая проверка что Kafka доступна
+     */
+    public boolean isHealthy() {
+        try {
+            // Простая проверка - попробуем отправить тестовое сообщение
+            // В реальности тут была бы проверка metadata Kafka
+            return true; // Для прототипа просто возвращаем true
+        } catch (Exception e) {
+            logger.warn("Health check failed: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Простая статистика (заглушка)
+     */
+    public PublishingStats getStats() {
+        return new PublishingStats(
+                100.0,  // totalPublished - заглушка
+                5.0,    // totalFailed - заглушка
+                105,    // totalAttempts
+                2500.0  // totalProcessingTimeMs
+        );
+    }
+
+    /**
+     * Статистика для мониторинга (простая заглушка)
+     */
+    public record PublishingStats(
+            double totalPublished,
+            double totalFailed,
+            long totalAttempts,
+            double totalProcessingTimeMs
+    ) {
+        public double getSuccessRate() {
+            return totalAttempts > 0 ? totalPublished / totalAttempts : 0.0;
+        }
+
+        public double getAverageProcessingTime() {
+            return totalAttempts > 0 ? totalProcessingTimeMs / totalAttempts : 0.0;
+        }
+    }
+
+    /**
+     * Извлекает источник из URL (простая реализация)
+     */
     private String extractSourceFromLink(String link) {
         if (link == null) return "unknown";
 

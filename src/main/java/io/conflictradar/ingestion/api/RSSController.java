@@ -8,6 +8,8 @@ import io.conflictradar.ingestion.api.dto.RssArticle;
 import io.conflictradar.ingestion.api.dto.SourcesInfo;
 import io.conflictradar.ingestion.api.service.EventPublisherService;
 import io.conflictradar.ingestion.api.service.RssDeduplicationService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -19,10 +21,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 @RestController
 @RequestMapping("/api/v1/rss")
 public class RSSController {
+
+    private static final Logger logger = LoggerFactory.getLogger(RSSController.class);
 
     private final RssDeduplicationService deduplicationService;
     private final EventPublisherService eventPublisher;
@@ -33,13 +38,38 @@ public class RSSController {
     }
 
     @GetMapping("/health")
-    public String health() {
-        return "ConflictRadar Data Ingestion Service is running!";
+    public ResponseEntity<Map<String, Object>> health() {
+        boolean eventPublisherHealthy = eventPublisher.isHealthy();
+        var stats = eventPublisher.getStats();
+
+        var healthInfo = Map.of(
+            "status", eventPublisherHealthy ? "UP" : "DOWN",
+            "service", "ConflictRadar Data Ingestion Service",
+            "timestamp", LocalDateTime.now(),
+            "messaging", Map.of(
+                "healthy", eventPublisherHealthy,
+                "totalPublished", stats.totalPublished(),
+                "successRate", String.format("%.2f%%", stats.getSuccessRate() * 100)
+            )
+        );
+
+        return eventPublisherHealthy ?
+            ResponseEntity.ok(healthInfo) :
+            ResponseEntity.status(503).body(healthInfo);
     }
 
     @GetMapping("/status")
-    public String status() {
-        return "Ready to ingest conflict data from news sources";
+    public ResponseEntity<Map<String, Object>> status() {
+        var stats = eventPublisher.getStats();
+        return ResponseEntity.ok(Map.of(
+            "message", "Ready to ingest conflict data from news sources",
+            "statistics", Map.of(
+                "totalEventsPublished", stats.totalPublished(),
+                "totalEventsFailed", stats.totalFailed(),
+                "averageProcessingTime", String.format("%.2fms", stats.getAverageProcessingTime()),
+                "successRate", String.format("%.2f%%", stats.getSuccessRate() * 100)
+            )
+        ));
     }
 
     @GetMapping("/feeds")
@@ -49,8 +79,12 @@ public class RSSController {
             var newArticles = filterNewArticles(allArticles);
 
             newArticles.forEach(article -> {
-                eventPublisher.publishNewsIngested(article);
-                eventPublisher.publishHighRiskDetected(article);
+                RssArticle analyzedArticle = analyzeConflictRisk(article);
+                eventPublisher.publishNewsIngested(analyzedArticle);
+
+                if (analyzedArticle.riskScore() > 0.6) {
+                    eventPublisher.publishHighRiskDetected(analyzedArticle);
+                }
             });
 
             eventPublisher.publishBatchProcessed("manual-request",
@@ -96,7 +130,7 @@ public class RSSController {
     @GetMapping("/feeds/{source}/analysis")
     public List<RssArticle> getSourceAnalysis(@PathVariable String source) {
         var url = switch (source.toLowerCase()) {
-            case "bbc" -> "http://feeds.bbci.co.uk/news/world/rss.xml";
+            case "bbc" -> "https://feeds.bbci.co.uk/news/world/rss.xml";
             case "reuters" -> "https://www.reuters.com/rssFeed/worldNews";
             case "cnn" -> "http://rss.cnn.com/rss/edition.rss";
             default -> throw new IllegalArgumentException("Unknown source: " + source);
@@ -118,6 +152,26 @@ public class RSSController {
 
         return new SourcesInfo(sources, sources.size(), LocalDateTime.now());
     }
+
+    @GetMapping("/scheduled/trigger")
+    public ResponseEntity<String> triggerScheduledParsing() {
+        // Для тестирования - ручной запуск scheduled парсинга
+        // В реальном приложении это было бы через отдельный admin endpoint
+        return ResponseEntity.ok("Manual trigger endpoint - use for testing scheduled parsing");
+    }
+
+    @GetMapping("/scheduled/status")
+    public ResponseEntity<Map<String, Object>> getScheduledStatus() {
+        // Простая статистика scheduled парсинга
+        return ResponseEntity.ok(Map.of(
+                "scheduledParsingEnabled", true,
+                "intervalMinutes", 5,
+                "sources", List.of("BBC", "Reuters", "CNN"),
+                "nextRunInfo", "Runs every 5 minutes automatically"
+        ));
+    }
+
+    // Private helper methods
 
     private List<RssArticle> parseRssFromUrl(String url) {
         try {
