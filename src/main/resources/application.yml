@@ -1,4 +1,7 @@
 spring:
+  application:
+    name: conflictradar-ingestion-service
+
   redis:
     host: ${SPRING_REDIS_HOST:localhost}
     port: ${SPRING_REDIS_PORT:6379}
@@ -23,4 +26,5 @@ logging:
   level:
     io.conflictradar: DEBUG
     org.springframework.kafka: INFO
-    org.apache.kafka: WARN
+    org.springframework.data.redis: INFO
+    com.rometools: WARN
