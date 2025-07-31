@@ -1,21 +1,13 @@
 package io.conflictradar.ingestion.api.service;
 
-import com.rometools.rome.feed.synd.SyndEntry;
-import com.rometools.rome.io.SyndFeedInput;
-import com.rometools.rome.io.XmlReader;
 import io.conflictradar.ingestion.api.dto.RssArticle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 @Service
 public class ScheduledRssService {
@@ -29,16 +21,16 @@ public class ScheduledRssService {
 
     private final RssDeduplicationService deduplicationService;
     private final EventPublisherService eventPublisher;
+    private final RssParsingService rssParsingService;
 
-    public ScheduledRssService(RssDeduplicationService deduplicationService,
+    public ScheduledRssService(RssParsingService rssParsingService,
+                               RssDeduplicationService deduplicationService,
                                EventPublisherService eventPublisher) {
+        this.rssParsingService = rssParsingService;
         this.deduplicationService = deduplicationService;
         this.eventPublisher = eventPublisher;
     }
 
-    /**
-     * Автоматический парсинг всех RSS источников каждые 5 минут
-     */
     @Scheduled(fixedRate = 300000, initialDelay = 30000)
     public void parseAllRssFeeds() {
         logger.info("Starting scheduled RSS parsing for {} sources", RSS_SOURCES.size());
@@ -49,9 +41,7 @@ public class ScheduledRssService {
 
         for (String rssUrl : RSS_SOURCES) {
             try {
-                logger.debug("Parsing RSS from: {}", rssUrl);
-
-                List<RssArticle> allArticles = parseRssFromUrl(rssUrl);
+                List<RssArticle> allArticles = rssParsingService.parseRssFromUrl(rssUrl);
                 List<RssArticle> newArticles = filterNewArticles(allArticles);
 
                 for (RssArticle article : newArticles) {
@@ -77,36 +67,12 @@ public class ScheduledRssService {
 
         long duration = System.currentTimeMillis() - startTime;
 
-        // Публикуем событие о завершении batch'а
         eventPublisher.publishBatchProcessed("scheduled-batch", totalArticles, totalNewArticles);
 
         logger.info("Scheduled RSS parsing completed: {} total, {} new articles in {}ms",
                 totalArticles, totalNewArticles, duration);
     }
 
-    // Копируем методы из RSSController (пока дублируем, потом вынесем в общий сервис)
-
-    private List<RssArticle> parseRssFromUrl(String url) {
-        try {
-            URL feedUrl = new URL(url);
-            HttpURLConnection connection = (HttpURLConnection) feedUrl.openConnection();
-            connection.setRequestProperty("User-Agent", "ConflictRadar/1.0");
-            connection.setInstanceFollowRedirects(true);
-            connection.setConnectTimeout(10000);
-            connection.setReadTimeout(30000);
-
-            var input = new SyndFeedInput();
-            var feed = input.build(new XmlReader(connection.getInputStream()));
-
-            return feed.getEntries().stream()
-                    .map(this::convertToRecord)
-                    .toList();
-
-        } catch (Exception e) {
-            logger.error("Failed to parse RSS from {}: {}", url, e.getMessage());
-            throw new RuntimeException("Failed to parse RSS from: " + url, e);
-        }
-    }
 
     private List<RssArticle> filterNewArticles(List<RssArticle> articles) {
         return articles.stream()
@@ -119,27 +85,6 @@ public class ScheduledRssService {
                     }
                 })
                 .toList();
-    }
-
-    private RssArticle convertToRecord(SyndEntry entry) {
-        var publishedAt = entry.getPublishedDate() != null
-                ? entry.getPublishedDate().toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime()
-                : LocalDateTime.now();
-
-        var description = entry.getDescription() != null
-                ? entry.getDescription().getValue()
-                : "";
-
-        return new RssArticle(
-                UUID.randomUUID().toString(),
-                entry.getTitle(),
-                description,
-                entry.getLink(),
-                entry.getAuthor(),
-                publishedAt,
-                Set.of(),
-                0.0
-        );
     }
 
     private RssArticle analyzeConflictRisk(RssArticle article) {
