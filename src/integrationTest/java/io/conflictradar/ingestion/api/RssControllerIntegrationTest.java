@@ -2,8 +2,6 @@ package io.conflictradar.ingestion.api;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
 import org.junit.jupiter.api.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -12,24 +10,14 @@ import org.springframework.context.ApplicationContextInitializer;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
-import org.springframework.core.env.Environment;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ContextConfiguration;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.support.TestPropertySourceUtils;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.KafkaContainer;
-import org.testcontainers.containers.wait.strategy.Wait;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
-import redis.clients.jedis.Jedis;
-
-import java.time.Duration;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static org.assertj.core.api.Assertions.*;
@@ -67,9 +55,6 @@ public class RssControllerIntegrationTest {
             String kafkaBootstrap = "spring.kafka.bootstrap-servers=" + kafka.getBootstrapServers();
 
             TestPropertySourceUtils.addInlinedPropertiesToEnvironment(context, redisHost, redisPort, kafkaBootstrap);
-
-            System.out.println("After setting - host: " + context.getEnvironment().getProperty("spring.redis.host"));
-            System.out.println("After setting - port: " + context.getEnvironment().getProperty("spring.redis.port"));
         }
     }
 
@@ -90,7 +75,8 @@ public class RssControllerIntegrationTest {
         ResponseEntity<String> response = restTemplate.getForEntity("/api/v1/rss/health", String.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getBody()).contains("running");
+        assertThat(response.getBody()).contains("UP");
+        assertThat(response.getBody()).contains("ConflictRadar Data Ingestion Service");
     }
 
     @Test

@@ -10,9 +10,9 @@ COPY settings.gradle .
 COPY src src
 
 RUN chmod +x ./gradlew
-RUN ./gradlew build -x test
+RUN ./gradlew build -x test -x integrationTest
 
-RUN cp build/libs/*.jar app.jar
+RUN cp build/libs/data-ingestion-service-1.0.0.jar app.jar
 RUN mkdir logs
 
 EXPOSE 8080
