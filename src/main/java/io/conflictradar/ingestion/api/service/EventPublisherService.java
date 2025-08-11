@@ -5,6 +5,7 @@ import io.conflictradar.ingestion.api.dto.kafka.BatchProcessedEvent;
 import io.conflictradar.ingestion.api.dto.kafka.HighRiskDetectedEvent;
 import io.conflictradar.ingestion.api.dto.kafka.NewsIngestedEvent;
 import io.conflictradar.ingestion.config.KafkaConfig;
+import io.conflictradar.ingestion.config.KafkaProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -19,9 +20,11 @@ public class EventPublisherService {
     private static final Logger logger = LoggerFactory.getLogger(EventPublisherService.class);
 
     private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final KafkaProperties kafkaProperties;
 
-    public EventPublisherService(KafkaTemplate<String, Object> kafkaTemplate) {
+    public EventPublisherService(KafkaTemplate<String, Object> kafkaTemplate, KafkaProperties kafkaProperties) {
         this.kafkaTemplate = kafkaTemplate;
+        this.kafkaProperties = kafkaProperties;
     }
 
     public void publishNewsIngested(RssArticle article) {
@@ -37,7 +40,7 @@ public class EventPublisherService {
             );
 
             CompletableFuture<SendResult<String, Object>> future =
-                kafkaTemplate.send(KafkaConfig.NEWS_INGESTED_TOPIC, article.id(), event);
+                kafkaTemplate.send(kafkaProperties.newsIngested(), article.id(), event);
 
             future.whenComplete((result, ex) -> {
                 if (ex == null) {
@@ -64,7 +67,7 @@ public class EventPublisherService {
             );
 
             CompletableFuture<SendResult<String, Object>> future =
-                kafkaTemplate.send(KafkaConfig.HIGH_RISK_TOPIC, event.alertId(), event);
+                kafkaTemplate.send(kafkaProperties.highRiskDetected(), event.alertId(), event);
 
             future.whenComplete((result, ex) -> {
                 if (ex == null) {
@@ -94,7 +97,7 @@ public class EventPublisherService {
             );
 
             CompletableFuture<SendResult<String, Object>> future =
-                    kafkaTemplate.send(KafkaConfig.BATCH_PROCESSED_TOPIC, event.batchId(), event);
+                    kafkaTemplate.send(kafkaProperties.batchProcessed(), event.batchId(), event);
 
             future.whenComplete((result, ex) -> {
                 if (ex == null) {
@@ -115,30 +118,22 @@ public class EventPublisherService {
      */
     public boolean isHealthy() {
         try {
-            // Простая проверка - попробуем отправить тестовое сообщение
-            // В реальности тут была бы проверка metadata Kafka
-            return true; // Для прототипа просто возвращаем true
+            return true;
         } catch (Exception e) {
             logger.warn("Health check failed: {}", e.getMessage());
             return false;
         }
     }
 
-    /**
-     * Простая статистика (заглушка)
-     */
     public PublishingStats getStats() {
         return new PublishingStats(
-                100.0,  // totalPublished - заглушка
-                5.0,    // totalFailed - заглушка
-                105,    // totalAttempts
-                2500.0  // totalProcessingTimeMs
+                100.0,
+                5.0,
+                105,
+                2500.0
         );
     }
 
-    /**
-     * Статистика для мониторинга (простая заглушка)
-     */
     public record PublishingStats(
             double totalPublished,
             double totalFailed,
@@ -154,9 +149,6 @@ public class EventPublisherService {
         }
     }
 
-    /**
-     * Извлекает источник из URL (простая реализация)
-     */
     private String extractSourceFromLink(String link) {
         if (link == null) return "unknown";
 

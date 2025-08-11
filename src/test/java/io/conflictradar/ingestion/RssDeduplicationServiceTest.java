@@ -1,4 +1,4 @@
-package io.conflictradat.ingestion;
+package io.conflictradar.ingestion;
 
 import io.conflictradar.ingestion.api.service.RssDeduplicationService;
 import org.junit.jupiter.api.BeforeEach;

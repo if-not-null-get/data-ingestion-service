@@ -1,30 +1,87 @@
 spring:
   application:
-    name: conflictradar-ingestion-service
+    name: data-ingestion-service
 
   redis:
-    host: ${SPRING_REDIS_HOST:localhost}
-    port: ${SPRING_REDIS_PORT:6379}
-    timeout: 2000ms
-    lettuce:
-      pool:
-        max-active: 8
-        max-idle: 8
-        min-idle: 0
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
 
+  # Kafka
   kafka:
-    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-      acks: all
-      retries: 3
-      properties:
-        enable.idempotence: true
 
+# RSS Sources Configuration
+rss:
+  sources:
+    - url: "https://feeds.bbci.co.uk/news/world/rss.xml"
+      name: "BBC World News"
+      weight: 1.0
+      enabled: true
+
+    - url: "https://feeds.reuters.com/Reuters/worldNews"
+      name: "Reuters World News"
+      weight: 0.9
+      enabled: true
+
+    - url: "http://rss.cnn.com/rss/edition.rss"
+      name: "CNN International"
+      weight: 0.8
+      enabled: false
+  http:
+    connect-timeout: 10000
+    read-timeout: 30000
+    max-retries: 3
+    retry-delay: 1000
+    user-agents:
+      - "ConflictRadar/1.0 (+https://conflictradar.io/bot)"
+      - "Mozilla/5.0 (compatible; ConflictRadar/1.0)"
+      - "ConflictRadarBot/1.0 (News Aggregator)"
+
+  # Processing Settings
+  processing:
+    schedule-interval: ${RSS_SCHEDULE_INTERVAL:PT5M}  # 5 minutes
+    initial-delay: ${RSS_INITIAL_DELAY:PT30S}         # 30 seconds
+    risk-threshold: ${RSS_RISK_THRESHOLD:0.6}
+    enable-scheduling: ${RSS_ENABLE_SCHEDULING:true}
+
+  # Risk Analysis Keywords
+  risk-analysis:
+    conflict-keywords:
+      - "war"
+      - "conflict"
+      - "attack"
+      - "violence"
+      - "terrorism"
+      - "terrorist"
+      - "bomb"
+      - "military"
+      - "battle"
+      - "invasion"
+
+    high-risk-keywords:
+      - "war"
+      - "terrorism"
+      - "terrorist"
+      - "bomb"
+      - "attack"
+      - "invasion"
+
+    critical-keywords:
+      - "nuclear"
+      - "chemical"
+      - "genocide"
+
+# Kafka Topics
+kafka:
+  topics:
+    news-ingested: news-ingested
+    high-risk-detected: high-risk-detected
+    batch-processed: batch-processed
+
+# Logging
 logging:
   level:
-    io.conflictradar: DEBUG
-    org.springframework.kafka: INFO
-    org.springframework.data.redis: INFO
-    com.rometools: WARN
+    io.conflictradar: INFO

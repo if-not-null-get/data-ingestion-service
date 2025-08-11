@@ -5,6 +5,7 @@ import com.rometools.rome.io.SyndFeedInput;
 import com.rometools.rome.io.XmlReader;
 import io.conflictradar.ingestion.api.dto.RssArticle;
 import io.conflictradar.ingestion.api.exception.ErrorCategory;
+import io.conflictradar.ingestion.config.RssConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.retry.annotation.Backoff;
@@ -12,26 +13,26 @@ import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.StringReader;
 import java.net.*;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.*;
+import java.util.zip.GZIPInputStream;
 
 @Service
 public class RssParsingService {
 
     private static final Logger logger = LoggerFactory.getLogger(RssParsingService.class);
 
-    private static final int CONNECT_TIMEOUT_MS = 10000;  // 10 sec
-    private static final int READ_TIMEOUT_MS = 30000;     // 30 sec
-
-    private static final String[] USER_AGENTS = {
-            "ConflictRadar/1.0 (+https://conflictradar.io/bot)",
-            "Mozilla/5.0 (compatible; ConflictRadar/1.0)",
-            "ConflictRadarBot/1.0 (News Aggregator)"
-    };
-
     private int userAgentIndex = 0;
+    private final RssConfig rssConfig;
+
+    public RssParsingService(RssConfig rssConfig) {
+        this.rssConfig = rssConfig;
+    }
 
     /**
      * Parse RSS with retry logic and comprehensive error handling
@@ -41,8 +42,8 @@ public class RssParsingService {
      */
     @Retryable(
             value = { IOException.class, SocketTimeoutException.class },
-            maxAttempts = 3,
-            backoff = @Backoff(delay = 1000, multiplier = 2.0, maxDelay = 10000)
+            maxAttemptsExpression = "#{@rssProps.maxAttempts}",
+            backoff = @Backoff(delayExpression = "#{@rssProps.retryDelay}", multiplier = 2.0, maxDelay = 10000)
     )
     public List<RssArticle> parseRssFromUrl(String url) {
         try {
@@ -66,7 +67,6 @@ public class RssParsingService {
         HttpURLConnection connection = null;
 
         try {
-            // Validate URL
             if (url == null || url.trim().isEmpty()) {
                 throw new RssParsingException("URL is null or empty", ErrorCategory.INVALID_URL);
             }
@@ -74,16 +74,15 @@ public class RssParsingService {
             URL feedUrl = new URL(url);
             connection = (HttpURLConnection) feedUrl.openConnection();
 
-            // Configure connection with timeouts and headers
             configureConnection(connection);
 
-            // Connect with timeout handling
             connection.connect();
 
-            // Check HTTP response
+            System.out.println("Response code: " + connection.getResponseCode());
+            System.out.println("Content-Type: " + connection.getContentType());
+
             validateHttpResponse(connection, url);
 
-            // Parse RSS feed
             return parseRssFeed(connection);
 
         } catch (MalformedURLException e) {
@@ -105,6 +104,17 @@ public class RssParsingService {
             throw new RssParsingException("I/O error reading: " + url, e, ErrorCategory.IO_ERROR);
 
         } catch (Exception e) {
+            System.out.println("=== FULL STACK TRACE ===");
+            e.printStackTrace();
+            System.out.println("Exception class: " + e.getClass().getName());
+            System.out.println("Exception message: " + e.getMessage());
+
+            if (e.getCause() != null) {
+                System.out.println("Caused by: " + e.getCause().getClass().getName());
+                System.out.println("Cause message: " + e.getCause().getMessage());
+                e.getCause().printStackTrace();
+            }
+
             throw new RssParsingException("Unexpected error: " + url, e, ErrorCategory.UNKNOWN);
 
         } finally {
@@ -118,9 +128,8 @@ public class RssParsingService {
      * Configure HTTP connection with proper headers and timeouts
      */
     private void configureConnection(HttpURLConnection connection) {
-        // Set timeouts
-        connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
-        connection.setReadTimeout(READ_TIMEOUT_MS);
+        connection.setConnectTimeout(rssConfig.http().connectTimeout());
+        connection.setReadTimeout(rssConfig.http().readTimeout());
 
         // Set headers to avoid blocking
         connection.setRequestProperty("User-Agent", getNextUserAgent());
@@ -130,7 +139,6 @@ public class RssParsingService {
         connection.setRequestProperty("Cache-Control", "no-cache");
         connection.setRequestProperty("Connection", "close");
 
-        // Configure behavior
         connection.setInstanceFollowRedirects(true);
         connection.setUseCaches(false);
         connection.setDoInput(true);
@@ -144,15 +152,12 @@ public class RssParsingService {
         int responseCode = connection.getResponseCode();
         String responseMessage = connection.getResponseMessage();
 
-        logger.debug("HTTP response for {}: {} {}", url, responseCode, responseMessage);
-
         switch (responseCode) {
             case HttpURLConnection.HTTP_OK:
                 // Check content type
                 String contentType = connection.getContentType();
                 if (contentType != null && !isValidRssContentType(contentType)) {
                     logger.warn("Unexpected content type for {}: {}", url, contentType);
-                    // Continue anyway - some sites have wrong content-type headers
                 }
                 break;
 
@@ -188,9 +193,25 @@ public class RssParsingService {
     }
 
     private List<RssArticle> parseRssFeed(HttpURLConnection connection) throws RssParsingException {
+
         try {
+            System.out.println("=== parseRssFeed started ===");
+
+            InputStream inputStream = connection.getInputStream();
+
+            // Проверь Content-Encoding для GZIP
+            String encoding = connection.getContentEncoding();
+            if ("gzip".equals(encoding)) {
+                inputStream = new GZIPInputStream(inputStream);
+            }
+
+            // Читай весь контент один раз
+            String xmlContent = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+            System.out.println("Received XML: " + xmlContent);
+
+            // Парси из строки через StringReader
             var input = new SyndFeedInput();
-            var feed = input.build(new XmlReader(connection.getInputStream()));
+            var feed = input.build(new StringReader(xmlContent));
 
             if (feed == null) {
                 throw new RssParsingException("RSS feed is null", ErrorCategory.PARSE_ERROR);
@@ -279,8 +300,9 @@ public class RssParsingService {
     }
 
     private String getNextUserAgent() {
-        String userAgent = USER_AGENTS[userAgentIndex];
-        userAgentIndex = (userAgentIndex + 1) % USER_AGENTS.length;
+        List<String> userAgents = rssConfig.http().userAgents();
+        String userAgent = userAgents.get(userAgentIndex);
+        userAgentIndex = (userAgentIndex + 1) % userAgents.size();
         return userAgent;
     }
 

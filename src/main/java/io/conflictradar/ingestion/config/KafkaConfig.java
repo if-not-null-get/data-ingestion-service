@@ -21,10 +21,6 @@ public class KafkaConfig {
     @Value("${spring.kafka.bootstrap-servers:localhost:9092}")
     private String bootstrapServers;
 
-    public static final String NEWS_INGESTED_TOPIC = "news-ingested";
-    public static final String HIGH_RISK_TOPIC = "high-risk-detected";
-    public static final String BATCH_PROCESSED_TOPIC = "batch-processed";
-
     @Bean
     public ProducerFactory<String, Object> producerFactory() {
         Map<String, Object> configProps = new HashMap<>();

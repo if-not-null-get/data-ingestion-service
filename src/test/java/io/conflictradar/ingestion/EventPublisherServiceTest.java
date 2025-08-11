@@ -1,7 +1,8 @@
-package io.conflictradat.ingestion;
+package io.conflictradar.ingestion;
 
 import io.conflictradar.ingestion.api.dto.RssArticle;
 import io.conflictradar.ingestion.api.service.EventPublisherService;
+import io.conflictradar.ingestion.config.KafkaProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -27,7 +28,13 @@ class EventPublisherServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new EventPublisherService(kafkaTemplate);
+        var kafkaConfig = new KafkaProperties(
+                "test-news-ingested",
+                "test-high-risk-detected",
+                "test-batch-processed"
+        );
+
+        service = new EventPublisherService(kafkaTemplate, kafkaConfig);
     }
 
     @Test
